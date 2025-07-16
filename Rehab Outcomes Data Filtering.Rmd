@@ -1,0 +1,361 @@
+---
+title: "Rehab Outcomes Data Filtering"
+author: "Ian Brown"
+date: "2025-03-07"
+output: html_document
+---
+
+### Introduction
+
+This is a guided walk-through of data manipulation from Qlik Sense functional rehab outcomes. This file is set-up by 6 coding "chunks" (gray areas):
+
+1. Setup
+2. Initiation
+3. Matched
+4. Compliance
+5. DX Grouped
+6. Excel Creation
+
+### Setup
+
+This chunk must be run when first using this file. The coding lines in green are "commented out" code. This happens when a # is used. These green lines are for installing packages that allow the code to run. Remove the # and run the chunk by pressing the green "play" button in the top right of the chunk. Replace the # once installed.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#install.packages("readxl")
+#install.packages("writexl")
+#install.packages("dplyr")
+#install.packages("tidyr")
+#install.packages("stringr")
+#install.packages("purrr")
+```
+
+### Initiation
+
+This chunk is initiating the packages and embedding the data set into RStudio. The code is written to only use a .csv file, so ensure you have the right file type. None of the following code will work if this chunk is not run. Besides the final chunk, all following chunks can be run independently.
+
+```{r initiation}
+library(readxl)
+library(writexl)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(purrr)
+
+# rename score.full as appropriate
+score.full <- read.csv("Data/Rehab Scoring Details Full.csv", sep = ",", stringsAsFactors = F)
+```
+
+### Matched
+
+Here is the code to manipulate Qlik Sense data to only have matched outcomes (each pre that has a post)
+
+```{r matched}
+# split data by pre and post scores
+pre.full <- score.full %>% filter(Visit.Score.Flag == "PRE")
+post.full <- score.full %>% filter(Visit.Score.Flag == "POST")
+
+# removes duplicates by only allowing 1 combination of variable list in group_by()
+pre.full <- pre.full %>%
+  group_by(Episode, Patient.DOB, MRN, Visit.Score.Type) %>%
+  slice(1) %>%
+  ungroup()
+post.full <- post.full %>%
+  group_by(Episode, Patient.DOB, MRN, Visit.Score.Type) %>%
+  slice(1) %>%
+  ungroup()
+
+# sanity check that there are no duplicates
+pre.dups <- pre.full %>%
+  group_by(Episode, Patient.DOB, MRN, Visit.Score.Type) %>%
+  filter(n() > 1)
+post.dups <- post.full %>%
+  group_by(Episode, Patient.DOB, MRN, Visit.Score.Type) %>%
+  filter(n() > 1)
+cat("Duplicate PREs after removal:", nrow(pre.dups),"\n")
+cat("Duplicate POSTs after removal:", nrow(post.dups),"\n")
+
+# merging pre and post tables by variables in (by) = c()
+matched.full <- merge(pre.full, post.full,
+                          by = c("Episode","Patient.DOB","MRN", "Visit.Score.Type"),
+                          suffixes = c(".pre", ".post"))
+
+# split into pre and post again to correct formatting
+pre.only <- matched.full %>%
+  mutate(across(ends_with(".pre"))) %>%
+  select(-ends_with(".post")) %>%
+  rename_with(~gsub("\\.pre$", "", .x))
+post.only <- matched.full %>%
+  mutate(across(ends_with(".post"))) %>%
+  select(-ends_with(".pre")) %>%
+  rename_with(~gsub("\\.post", "", .x))
+
+# appending pre and post data sets together and correcting for original formatting
+match.full <- bind_rows(pre.only, post.only)
+match.full <- match.full %>% select(
+  Visit.Date,
+  Episode,
+  Department.Name,
+  Visit.Provider,
+  Visit.Type,
+  Patient.Name,
+  MRN,
+  Patient.DOB,
+  Patient.Gender,
+  Visit.Score.Flag,
+  Visit.Score.Type,
+  Visit.Score,
+  Injured.Body.Part,
+  Visit.Primary.DX.Name,
+  Visit.All.DX.Name,
+  CSN,
+  Episode.Oldest.Visit,
+  Episode.Newest.Visit
+)
+```
+
+### Compliance
+
+This chunk is for compliance purposes. An additional column is added so there is a way to distinguish between the 2 data sets that were appended (added at the end) together.
+
+```{r compliance}
+# adding another row to differentiate data sets
+compliance.full <- score.full %>%
+  mutate(Table = "Qlik Sense")
+compliance.match <- match.full %>%
+  mutate(Table = "Matched")
+
+# appending the 2 data sets together
+compliance <- bind_rows(compliance.full, compliance.match)
+
+# sanity check for when working with excel
+comp.full.len <- length(unique(compliance.full$Episode))
+comp.match.len <- length(unique(compliance.match$Episode))
+cat("Portion of Matched Pairs:", comp.match.len / comp.full.len, "\n")
+```
+
+### DX Grouped
+
+This is the longest and most complicated code in this file. It takes all diagnoses and groups them together based on key words. This is done for the primary visit diagnosis and all visit diagnoses columns separately. The all visits column is separated into multiple columns based on the "|" delineators. It is manipulated in such a way that the groupings are the same as primary visit diagnosis and merged back into 1 column with "|" delineating. 
+
+```{r dx.grouped}
+# qlik sense data but only for functional rehab
+func <- score.full %>% filter(Visit.Type == "FUNCTIONAL REHABILITATION EVAL" | Visit.Type == "FUNCTIONAL REHABILITATION TX")
+
+# grouping primary dx
+func <- func %>%
+  mutate(
+    dx = tolower(str_trim(Visit.Primary.DX.Name)),
+    Primary.DX = case_when(
+      str_detect(dx, "ankle (sprain|pain)|ankle.*pain|pain.*ankle") ~ "ankle sprain and ankle pain",
+      str_detect(dx, "instability.*ankle") ~ "instability of ankle",
+      str_detect(dx, "anterior cruciate ligament|\\bacl\\b") ~ "anterior cruciate ligament",
+      str_detect(dx, "apophysitis") ~ "apophysitis",
+      str_detect(dx, "chronic.*pain.*knee|knee.*chronic pain") ~ "chronic pain knee",
+      str_detect(dx, "knee pain.*unspecified|acute pain.*knee|knee.*acute pain") ~ "acute pain knee",
+      str_detect(dx, "effusion.*knee") ~ "effusion of knee",
+      str_detect(dx, "elbow.*pain|pain.*elbow") ~ "elbow pain",
+      str_detect(dx, "pain.*hip|hip.*pain") ~ "hip pain",
+      str_detect(dx, "little league elbow") ~ "little league elbow",
+      str_detect(dx, "little.*shoulder|shoulder.*little|juvenile.* osteochondrosis|osteochondrosis.*juvenile") ~ "little league shoulder and juvenile osteochondrosis of upper extremity",
+      str_detect(dx, "pain.*low back|low back.*pain") ~ "low back pain",
+      str_detect(dx, "osgood") ~ "osgood-schlatter's disease",
+      str_detect(dx, "patellar.*strain|patellar.*tendinitis|strain.*patellar|tendinitis.*patellar") ~ "patellar tendinitis",
+      str_detect(dx, "patellofemoral.*pain|patellofemoral.*syndrome") ~ "patellofemoral pain syndrome",
+      str_detect(dx, "rotator") ~ "rotator cuff",
+      str_detect(dx, "shoulder.*pain|pain.*shoulder") ~ "shoulder pain",
+      str_detect(dx, "spondylolysis") ~ "spondylolysis",
+      str_detect(dx, "decreased.*strength|muscle.*reduced") ~ "decreased strength, endurance, or mobility",
+      str_detect(dx, "biceps tendinitis") ~ "biceps tendinitis",
+      str_detect(dx, "pain.*lower.*extremity|pain.*leg") ~ "pain of lower extremity",
+      str_detect(dx, "pain.*upper.*extremity|pain.*arm") ~ "pain of upper extremity",
+      str_detect(dx, "pain.*foot|foot.*pain") ~ "foot pain",
+      TRUE ~ dx
+    )
+  )
+
+# splits all visit dx into separate columns
+max.splits <- max(sapply(strsplit(as.character(func$Visit.All.DX.Name), "\\|"), length))
+DX.colnames <- paste0("All.DX.Split.", 1:max.splits)
+DX.split <- func %>%
+  mutate(row_id = row_number()) %>%
+  separate(Visit.All.DX.Name, into = DX.colnames, sep = "\\|", fill = "right")
+
+# converts separated dx columns into 1 long column
+dx.long <- DX.split %>%
+  select(row_id, all_of(DX.colnames)) %>%
+  pivot_longer(cols = starts_with("All.DX.Split."), names_to = "dx.col", values_to = "dx") %>%
+  mutate(dx = tolower(str_trim(dx)))
+
+# grouping all dx
+dx.long <- dx.long %>%
+  mutate(
+    grouped.dx = case_when(
+      str_detect(dx, "ankle (sprain|pain)|ankle.*pain|pain.*ankle") ~ "ankle sprain and ankle pain",
+      str_detect(dx, "instability.*ankle") ~ "instability of ankle",
+      str_detect(dx, "anterior cruciate ligament|\\bacl\\b") ~ "anterior cruciate ligament",
+      str_detect(dx, "apophysitis") ~ "apophysitis",
+      str_detect(dx, "chronic.*pain.*knee|knee.*chronic pain") ~ "chronic pain knee",
+      str_detect(dx, "knee pain.*unspecified|acute pain.*knee|knee.*acute pain") ~ "acute pain knee",
+      str_detect(dx, "effusion.*knee") ~ "effusion of knee",
+      str_detect(dx, "elbow.*pain|pain.*elbow") ~ "elbow pain",
+      str_detect(dx, "pain.*hip|hip.*pain") ~ "hip pain",
+      str_detect(dx, "little league elbow") ~ "little league elbow",
+      str_detect(dx, "little.*shoulder|shoulder.*little|juvenile.* osteochondrosis|osteochondrosis.*juvenile") ~ "little league shoulder and juvenile osteochondrosis of upper extremity",
+      str_detect(dx, "pain.*low back|low back.*pain") ~ "low back pain",
+      str_detect(dx, "osgood") ~ "osgood-schlatter's disease",
+      str_detect(dx, "patellar.*strain|patellar.*tendinitis|strain.*patellar|tendinitis.*patellar") ~ "patellar tendinitis",
+      str_detect(dx, "patellofemoral.*pain|patellofemoral.*syndrome") ~ "patellofemoral pain syndrome",
+      str_detect(dx, "rotator") ~ "rotator cuff",
+      str_detect(dx, "shoulder.*pain|pain.*shoulder") ~ "shoulder pain",
+      str_detect(dx, "spondylolysis") ~ "spondylolysis",
+      str_detect(dx, "decreased.*strength|muscle.*reduced") ~ "decreased strength, endurance, or mobility",
+      str_detect(dx, "biceps tendinitis") ~ "biceps tendinitis",
+      str_detect(dx, "pain.*lower.*extremity|pain.*leg") ~ "pain of lower extremity",
+      str_detect(dx, "pain.*upper.*extremity|pain.*arm") ~ "pain of upper extremity",
+      str_detect(dx, "pain.*foot|foot.*pain") ~ "foot pain",
+      TRUE ~ dx
+    )
+  )
+
+# reverts all dx to multiple columns instead of one
+dx.wide <- dx.long %>%
+  select(row_id, dx.col, grouped.dx) %>%
+  pivot_wider(names_from = dx.col, values_from = grouped.dx)
+
+# merging all dx columns into one column, formatting as qlik sense but in alphebetical order
+func.grouped <- func %>%
+  mutate(row_id = row_number()) %>%
+  left_join(dx.wide, by = "row_id") %>%
+  select(-row_id) %>%
+  unite("All.DX", starts_with("All.DX.Split."), sep = " | ", na.rm = TRUE) %>%
+  mutate(
+    All.DX = All.DX %>%
+      str_split(" \\| ") %>%
+      map(~ unique(sort(.x))) %>%
+      map_chr(~ paste(.x, collapse = " | "))
+  ) %>%
+  # formatting
+  select(-c(Visit.Primary.DX.Name, Visit.All.DX.Name, dx)) %>%
+  select(
+    Visit.Date,
+    Episode,
+    Department.Name,
+    Visit.Provider,
+    Visit.Type,
+    Patient.Name,
+    MRN,
+    Patient.DOB,
+    Patient.Gender,
+    Visit.Score.Flag,
+    Visit.Score.Type,
+    Visit.Score,
+    Injured.Body.Part,
+    Primary.DX,
+    All.DX,
+    CSN,
+    Episode.Oldest.Visit,
+    Episode.Newest.Visit
+  )
+
+# filtering out any primary dx with less than 100 occurances
+func.grouped <- func.grouped %>%
+  group_by(Primary.DX) %>%
+  mutate(n = n()) %>%
+  filter(n >= 100) %>%
+  select(-n) %>%
+  ungroup()
+
+# looks at unique values, arranged by number of occurances
+DX.primary.sum <- func %>%
+  group_by(Primary.DX) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count))
+DX.all.sum <- dx.long %>%
+  group_by(grouped.dx) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count))
+```
+
+```{r dx.grouped.matched}
+# split data by pre and post scores
+pre.dx <- func.grouped %>% filter(Visit.Score.Flag == "PRE")
+post.dx <- func.grouped %>% filter(Visit.Score.Flag == "POST")
+
+# removes duplicates by only allowing 1 combination of variable list in group_by()
+pre.dx <- pre.dx %>%
+  group_by(Episode, Patient.DOB, MRN, Visit.Score.Type) %>%
+  slice(1) %>%
+  ungroup()
+post.dx <- post.dx %>%
+  group_by(Episode, Patient.DOB, MRN, Visit.Score.Type) %>%
+  slice(1) %>%
+  ungroup()
+
+# sanity check that there are no duplicates
+pre.dups <- pre.dx %>%
+  group_by(Episode, Patient.DOB, MRN, Visit.Score.Type) %>%
+  filter(n() > 1)
+post.dups <- post.dx %>%
+  group_by(Episode, Patient.DOB, MRN, Visit.Score.Type) %>%
+  filter(n() > 1)
+cat("Duplicate PREs after removal:", nrow(pre.dups),"\n")
+cat("Duplicate POSTs after removal:", nrow(post.dups),"\n")
+
+# merging pre and post tables by variables in (by) = c()
+matched.func <- merge(pre.dx, post.dx,
+                          by = c("Episode","Patient.DOB","MRN", "Visit.Score.Type"),
+                          suffixes = c(".pre", ".post"))
+
+# split into pre and post again to correct formatting
+pre.only <- matched.func %>%
+  mutate(across(ends_with(".pre"))) %>%
+  select(-ends_with(".post")) %>%
+  rename_with(~gsub("\\.pre$", "", .x))
+post.only <- matched.func %>%
+  mutate(across(ends_with(".post"))) %>%
+  select(-ends_with(".pre")) %>%
+  rename_with(~gsub("\\.post", "", .x))
+
+# appending pre and post data sets together and correcting for original formatting
+match.func <- bind_rows(pre.dx, post.dx)
+match.func <- match.func %>% select(
+  Visit.Date,
+  Episode,
+  Department.Name,
+  Visit.Provider,
+  Visit.Type,
+  Patient.Name,
+  MRN,
+  Patient.DOB,
+  Patient.Gender,
+  Visit.Score.Flag,
+  Visit.Score.Type,
+  Visit.Score,
+  Injured.Body.Part,
+  Primary.DX,
+  All.DX,
+  CSN,
+  Episode.Oldest.Visit,
+  Episode.Newest.Visit
+)
+```
+
+### Excel Creation
+
+If the 3 main chunks have been run, this chunk will provide 3 separate excel spreadsheets. Any chunks not run must have the respective line of code commented out to avoid errors.
+
+```{r excel.creation}
+# changes variable names to match formatting of original data
+names(match.full) <- gsub("\\.", " ", names(match.full))
+names(compliance) <- gsub("\\.", " ", names(compliance))
+names(func.grouped) <- gsub("\\.", " ", names(func.grouped))
+names(match.func) <- gsub("\\.", " ", names(match.func))
+
+# creates excel files for the 3 manipulated data sets
+write_xlsx(match.full, "Rehab Outcomes Matched.xlsx", col_names = TRUE, format_headers = TRUE, use_zip64 = FALSE)
+write_xlsx(compliance, "Rehab Outcomes Compliance.xlsx", col_names = TRUE, format_headers = TRUE, use_zip64 = FALSE)
+write_xlsx(func.grouped, "Functional Rehab DX Grouped.xlsx", col_names = TRUE, format_headers = TRUE, use_zip64 = FALSE)
+write_xlsx(match.func, "Functional Rehab DX Grouped Matched.xlsx", col_names = TRUE, format_headers = TRUE, use_zip64 = FALSE)
+```
+
