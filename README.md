@@ -12,8 +12,7 @@ Developed to support analysis of >10,000 de-identified patient records, this pip
 - Excel export automation
 
 ## Repository Contents
-- `dx_grouping_script.R` – Maps raw text to diagnosis groups
-- `merge_outcomes_script.R` – Matches pre/post visits for analysis
+- `Rehab Outcomes Data Filtering.Rmd` – Pipeline
 
 ## Data Disclaimer
 Due to patient privacy, raw data is not included. All scripts are designed to work with standard Qlik Sense exports.
