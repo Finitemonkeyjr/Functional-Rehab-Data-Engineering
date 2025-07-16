@@ -1,0 +1,386 @@
+---
+title: "RPE-FUN ANALYSIS"
+author: "Ian Brown"
+date: "2025-02-20"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r chunk2, echo=FALSE, include=FALSE}
+library(tidyr)
+library(dplyr)
+library(rstatix)
+library(nlme)
+library(leaps)
+```
+
+### Data Preparation and Analysis Background
+
+Data were averaged between both sessions of HIIT and PLAY. The time spent in the 5 HR zones were split between Vigorous, Moderate, and Light (5/4, 3/2, and 1 respectively). All subjects with missing values were excluded at this time.
+
+```{r chunk3, echo=FALSE, include=FALSE}
+RPE.FUN <- read.csv('Data/RPE_FUN_AVG.csv', header = T) # 897 obs.
+RPE.FUN <- na.omit(RPE.FUN)
+# RPE.FUN <- RPE.FUN %>% drop_na(HIIT.RPE | HIIT.FUN | PLAY.RPE | PLAY.FUN) # 383 obs.
+
+attach(RPE.FUN)
+
+# Change class types as needed
+RPE.FUN <- RPE.FUN %>%
+  mutate(SUBJECT = as.character(SUBJECT))
+RPE.FUN <- RPE.FUN %>%
+  mutate(SEX = as.factor(SEX))
+RPE.FUN <- RPE.FUN %>%
+  mutate(WEEK = as.character(WEEK))
+RPE.FUN <- RPE.FUN %>%
+  mutate(LESSON.PLAN = as.factor(LESSON.PLAN))
+RPE.FUN <- RPE.FUN %>%
+  mutate(HIIT.PLAY.1 = as.factor(HIIT.PLAY.1))
+
+attach(RPE.FUN)
+
+# Fill remaining NAs with column medians
+# RPE.FUN <- RPE.FUN %>% mutate(across(c(BASE.HR,
+                                       # HIIT.SEC, HIIT.VIG.SEC, HIIT.MOD.SEC, HIIT.LIGHT.SEC,
+                                       # HIIT.VIG.PERC, HIIT.MOD.PERC, HIIT.LIGHT.PERC,
+                                       # PLAY.SEC, PLAY.VIG.SEC, PLAY.MOD.SEC, PLAY.LIGHT.SEC,
+                                       # PLAY.VIG.PERC, PLAY.MOD.PERC, PLAY.LIGHT.PERC),
+                                     # ~replace_na(., median(., na.rm = TRUE))))
+
+# attach(RPE.FUN)
+```
+
+### 2-Sided t-tests with Bonferroni adjusted p-values
+
+```{r chunk4, echo=FALSE}
+t1 <- t.test(HIIT.SEC, PLAY.SEC, paired = TRUE)
+t2 <- t.test(HIIT.RPE, PLAY.RPE, paired = TRUE)
+t3 <- t.test(HIIT.FUN, PLAY.FUN, paired = TRUE)
+t4 <- t.test(HIIT.VIG.PERC, PLAY.VIG.PERC, paired = TRUE)
+t5 <- t.test(HIIT.MOD.PERC, PLAY.MOD.PERC, paired = TRUE)
+
+M.subset <- subset(RPE.FUN, SEX == "M")
+F.subset.full <- subset(RPE.FUN, SEX == "F")
+F.subset <- sample_n(F.subset.full, 109)
+
+t6 <- t.test(M.subset$HIIT.RPE, F.subset$HIIT.RPE, paired = T)
+t7 <- t.test(M.subset$HIIT.FUN, F.subset$HIIT.FUN, paired = T)
+t8 <- t.test(M.subset$PLAY.RPE, F.subset$PLAY.RPE, paired = T)
+t9 <- t.test(M.subset$PLAY.FUN, F.subset$PLAY.FUN, paired = T)
+
+# Vector of all p-values
+d1 <- data.frame(test = "Time HIIT vs PLAY", est = t1$estimate, raw_p=t1$p.value)
+d2 <- data.frame(test = "RPE HIIT vs PLAY", est = t2$estimate, raw_p=t2$p.value)
+d3 <- data.frame(test = "FUN HIIT vs PLAY", est = t3$estimate, raw_p=t3$p.value)
+d4 <- data.frame(test = "Vig % HIIT vs PLAY", est = t4$estimate, raw_p=t4$p.value)
+d5 <- data.frame(test = "Mod % HIIT vs PLAY", est = t5$estimate, raw_p=t5$p.value)
+d6 <- data.frame(test = "RPE HIIT Sex", est = t6$estimate, raw_p=t6$p.value)
+d7 <- data.frame(test = "FUN HIIT Sex", est = t7$estimate, raw_p=t7$p.value)
+d8 <- data.frame(test = "RPE PLAY Sex", est = t8$estimate, raw_p=t8$p.value)
+d9 <- data.frame(test = "FUN PLAY Sex", est = t9$estimate, raw_p=t9$p.value)
+
+res <- rbind(d1,d2,d3,d4,d5,d6,d7,d8,d9)
+res$bon <- p.adjust(res$raw_p, method = "bonferroni")
+res
+```
+
+### Linear Mixed Effect Models
+
+####### HIIT.RPE
+
+```{r chunk5, echo=FALSE}
+m1 <- lme(HIIT.RPE ~ PLAY.FUN, data = RPE.FUN,
+          random = ~ 1|SUBJECT,
+          control = lmeControl(opt = 'optim'))
+m2 <- lme(HIIT.RPE ~ PLAY.RPE, data = RPE.FUN,
+          random = ~ 1|SUBJECT,
+          control = lmeControl(opt = 'optim'))
+m3 <- lme(HIIT.RPE ~ HIIT.FUN, data = RPE.FUN,
+          random = ~ 1|SUBJECT,
+          control = lmeControl(opt = 'optim'))
+m4 <- lme(HIIT.RPE ~ HIIT.MOD.PERC+HIIT.VIG.PERC, data = RPE.FUN,
+          random = ~ 1|SUBJECT,
+          control = lmeControl(opt = 'optim'))
+m5 <- lme(HIIT.RPE ~ AGE, data = RPE.FUN,
+          random = ~ 1|SUBJECT,
+          control = lmeControl(opt = 'optim'))
+
+tut1 <- summary(m1)
+tabl1 <- tut1$tTable
+tut2 <- summary(m2)
+tabl2 <- tut2$tTable
+tut3 <- summary(m3)
+tabl3 <- tut3$tTable
+tut4 <- summary(m4)
+tabl4 <- tut4$tTable
+tut5 <- summary(m5)
+tabl5 <- tut5$tTable
+
+tabl1
+tabl2
+tabl3
+tabl4
+tabl5
+```
+
+
+
+```{r chunk6, echo=FALSE}
+reg.fit <- regsubsets(HIIT.RPE ~ HIIT.FUN+PLAY.RPE+PLAY.FUN+
+                      BASE.HR+HIIT.VIG.PERC+HIIT.MOD.PERC+PLAY.VIG.PERC+PLAY.MOD.PERC+
+                      AGE+SEX+HEIGHT..cm.+WEIGHT..kg.+LESSON.PLAN,
+                      nvmax = 30,
+                      data = RPE.FUN)
+reg.summary <- summary(reg.fit)
+
+w_cp<-which.min(reg.summary$cp)
+plot(reg.summary$cp, xlab = "Number of Variables",
+    ylab = "Cp", type = "l",main="Pick based on Cp")
+points(w_cp, reg.summary$cp[w_cp], col = "red", cex = 2,
+    pch = 20)
+
+n <- length(RPE.FUN$HIIT.RPE)
+p <- apply(reg.summary$which, 1, sum)
+aic <- reg.summary$bic - log(n) * p + 2 * p
+w_a<-unname(which.min(aic))
+plot(aic, xlab = "Number of Variables",
+    ylab = "AIC", type = "l",main="Pick based on AIC")
+points(w_a, aic[w_a], col = "blue", cex = 2,
+    pch = 20)
+
+w_b<-which.min(reg.summary$bic)
+plot(reg.summary$bic, xlab = "Number of Variables",
+    ylab = "BIC", type = "l",main="Pick based on BIC")
+points(w_b, reg.summary$bic[w_b], col = "green", cex = 2,
+    pch = 20)
+
+w_r<-which.max(reg.summary$adjr2)
+plot(reg.summary$adjr2, xlab = "Number of Variables",
+    ylab = "adj r2", type = "l",main="Pick based on adjusted Rsquared")
+points(w_r, reg.summary$adjr2[w_r], col = "orange", cex = 2,
+    pch = 20)
+
+w_r2<-which.max(reg.summary$rsq)
+plot(reg.summary$rsq, xlab = "Number of Variables",
+    ylab = "r2", type = "l",main="Pick based on Rsquared")
+points(w_r2, reg.summary$rsq[w_r2], col = "purple", cex = 2,
+    pch = 20)
+
+w_cp
+w_a
+w_b
+w_r
+w_r2
+```
+
+
+
+```{r chunk7, echo=FALSE}
+m <- lme(HIIT.RPE ~ 
+          PLAY.RPE+
+          # PLAY.FUN+
+          HIIT.FUN+
+          # HIIT.VIG.PERC+HIIT.MOD.PERC+PLAY.VIG.PERC+HIIT.MOD.PERC+
+          # SEX+WEIGHT..kg.+
+          LESSON.PLAN,
+          data = RPE.FUN,
+          random = ~ 1|SUBJECT,
+          control = lmeControl(opt = 'optim'))
+tut <- summary(m)
+tabl <- tut$tTable
+tabl
+```
+
+####### HIIT.FUN
+
+```{r chunk8, echo=FALSE}
+reg.fit <- regsubsets(HIIT.FUN ~ HIIT.RPE+PLAY.RPE+PLAY.FUN+
+                      BASE.HR+HIIT.VIG.PERC+HIIT.MOD.PERC+PLAY.VIG.PERC+PLAY.MOD.PERC+
+                      AGE+SEX+HEIGHT..cm.+WEIGHT..kg.+LESSON.PLAN,
+                      nvmax = 30,
+                      data = RPE.FUN)
+reg.summary <- summary(reg.fit)
+reg.summary
+```
+
+```{r}
+w_cp<-which.min(reg.summary$cp)
+plot(reg.summary$cp, xlab = "Number of Variables",
+    ylab = "Cp", type = "l",main="Pick based on Cp")
+points(w_cp, reg.summary$cp[w_cp], col = "red", cex = 2,
+    pch = 20)
+
+n <- length(RPE.FUN$HIIT.RPE)
+p <- apply(reg.summary$which, 1, sum)
+aic <- reg.summary$bic - log(n) * p + 2 * p
+w_a<-unname(which.min(aic))
+plot(aic, xlab = "Number of Variables",
+    ylab = "AIC", type = "l",main="Pick based on AIC")
+points(w_a, aic[w_a], col = "blue", cex = 2,
+    pch = 20)
+
+w_b<-which.min(reg.summary$bic)
+plot(reg.summary$bic, xlab = "Number of Variables",
+    ylab = "BIC", type = "l",main="Pick based on BIC")
+points(w_b, reg.summary$bic[w_b], col = "green", cex = 2,
+    pch = 20)
+
+w_r<-which.max(reg.summary$adjr2)
+plot(reg.summary$adjr2, xlab = "Number of Variables",
+    ylab = "adj r2", type = "l",main="Pick based on adjusted Rsquared")
+points(w_r, reg.summary$adjr2[w_r], col = "orange", cex = 2,
+    pch = 20)
+
+w_r2<-which.max(reg.summary$rsq)
+plot(reg.summary$rsq, xlab = "Number of Variables",
+    ylab = "r2", type = "l",main="Pick based on Rsquared")
+points(w_r2, reg.summary$rsq[w_r2], col = "purple", cex = 2,
+    pch = 20)
+
+w_cp
+w_a
+w_b
+w_r
+w_r2
+```
+
+
+
+```{r chunk9}
+m <- lme(HIIT.FUN ~ 
+          PLAY.FUN+
+          HIIT.RPE+
+          # HIIT.VIG.PERC+HIIT.MOD.PERC+PLAY.VIG.PERC+HIIT.MOD.PERC+
+          # SEX+WEIGHT..kg.+
+          LESSON.PLAN,
+          data = RPE.FUN,
+          random = ~ 1|SUBJECT,
+          control = lmeControl(opt = 'optim'))
+tut <- summary(m)
+tabl <- tut$tTable
+tabl
+```
+
+####### PLAY.RPE
+
+```{r chunk10}
+reg.fit <- regsubsets(PLAY.RPE ~ HIIT.FUN+HIIT.RPE+PLAY.FUN+
+                      BASE.HR+HIIT.VIG.PERC+HIIT.MOD.PERC+PLAY.VIG.PERC+PLAY.MOD.PERC+
+                      AGE+SEX+HEIGHT..cm.+WEIGHT..kg.+LESSON.PLAN,
+                      nvmax = 30,
+                      data = RPE.FUN)
+reg.summary <- summary(reg.fit)
+reg.summary
+```
+
+w_cp<-which.min(reg.summary$cp)
+plot(reg.summary$cp, xlab = "Number of Variables",
+    ylab = "Cp", type = "l",main="Pick based on Cp")
+points(w_cp, reg.summary$cp[w_cp], col = "red", cex = 2,
+    pch = 20)
+
+n <- length(RPE.FUN$HIIT.RPE)
+p <- apply(reg.summary$which, 1, sum)
+aic <- reg.summary$bic - log(n) * p + 2 * p
+w_a<-unname(which.min(aic))
+plot(aic, xlab = "Number of Variables",
+    ylab = "AIC", type = "l",main="Pick based on AIC")
+points(w_a, aic[w_a], col = "blue", cex = 2,
+    pch = 20)
+
+w_b<-which.min(reg.summary$bic)
+plot(reg.summary$bic, xlab = "Number of Variables",
+    ylab = "BIC", type = "l",main="Pick based on BIC")
+points(w_b, reg.summary$bic[w_b], col = "green", cex = 2,
+    pch = 20)
+
+w_r<-which.max(reg.summary$adjr2)
+plot(reg.summary$adjr2, xlab = "Number of Variables",
+    ylab = "adj r2", type = "l",main="Pick based on adjusted Rsquared")
+points(w_r, reg.summary$adjr2[w_r], col = "orange", cex = 2,
+    pch = 20)
+
+w_r2<-which.max(reg.summary$rsq)
+plot(reg.summary$rsq, xlab = "Number of Variables",
+    ylab = "r2", type = "l",main="Pick based on Rsquared")
+points(w_r2, reg.summary$rsq[w_r2], col = "purple", cex = 2,
+    pch = 20)
+
+w_cp
+w_a
+w_b
+w_r
+w_r2
+```
+
+
+
+```{r chunk11}
+
+```
+
+####### PLAY.FUN
+
+```{r chunk12}
+reg.fit <- regsubsets(PLAY.FUN ~ HIIT.FUN+PLAY.RPE+HIIT.RPE+
+                      BASE.HR+HIIT.VIG.PERC+HIIT.MOD.PERC+PLAY.VIG.PERC+PLAY.MOD.PERC+
+                      AGE+SEX+HEIGHT..cm.+WEIGHT..kg.+LESSON.PLAN,
+                      data = RPE.FUN)
+reg.summary <- summary(reg.fit)
+
+w_cp<-which.min(reg.summary$cp)
+plot(reg.summary$cp, xlab = "Number of Variables",
+    ylab = "Cp", type = "l",main="Pick based on Cp")
+points(w_cp, reg.summary$cp[w_cp], col = "red", cex = 2,
+    pch = 20)
+
+n <- length(RPE.FUN$HIIT.RPE)
+p <- apply(reg.summary$which, 1, sum)
+aic <- reg.summary$bic - log(n) * p + 2 * p
+w_a<-unname(which.min(aic))
+plot(aic, xlab = "Number of Variables",
+    ylab = "AIC", type = "l",main="Pick based on AIC")
+points(w_a, aic[w_a], col = "blue", cex = 2,
+    pch = 20)
+
+w_b<-which.min(reg.summary$bic)
+plot(reg.summary$bic, xlab = "Number of Variables",
+    ylab = "BIC", type = "l",main="Pick based on BIC")
+points(w_b, reg.summary$bic[w_b], col = "green", cex = 2,
+    pch = 20)
+
+w_r<-which.max(reg.summary$adjr2)
+plot(reg.summary$adjr2, xlab = "Number of Variables",
+    ylab = "adj r2", type = "l",main="Pick based on adjusted Rsquared")
+points(w_r, reg.summary$adjr2[w_r], col = "orange", cex = 2,
+    pch = 20)
+
+w_r2<-which.max(reg.summary$rsq)
+plot(reg.summary$rsq, xlab = "Number of Variables",
+    ylab = "r2", type = "l",main="Pick based on Rsquared")
+points(w_r2, reg.summary$rsq[w_r2], col = "purple", cex = 2,
+    pch = 20)
+
+w_cp
+w_a
+w_b
+w_r
+w_r2
+```
+
+
+
+```{r chunk13}
+
+```
+
+
+
+```{r chunk14}
+
+```

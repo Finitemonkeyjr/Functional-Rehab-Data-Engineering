@@ -1,0 +1,101 @@
+---
+title: "RPE.FUN Mixed Linear Models"
+author: "Ian Brown"
+date: "2025-03-11"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r chunk2, echo=FALSE, include=FALSE}
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+library(lme4)
+library(lmerTest)
+```
+
+```{r chunk3, echo=FALSE, include=FALSE}
+RPE.FUN.wide <- read.csv('Data/RPE_FUN_AVG.csv', header = T)
+RPE.FUN.wide <- na.omit(RPE.FUN.wide)
+RPE.FUN.wide <- RPE.FUN.wide[RPE.FUN.wide$WEEK < 11, ]
+attach(RPE.FUN.wide)
+
+RPE.FUN <- RPE.FUN.wide %>%
+  gather(key = "outcome", value = "score",
+         HIIT.RPE, HIIT.FUN, PLAY.RPE, PLAY.FUN) %>%
+  mutate(outcome = as.factor(outcome)) %>%
+  mutate(SUBJECT = as.factor(SUBJECT)) %>%
+  mutate(WEEK = as.factor(WEEK))
+RPE.FUN <- RPE.FUN[, -c(4:6,8,9,12:14,19:21)]
+
+RPE <- RPE.FUN %>% filter(outcome == "HIIT.RPE" | outcome == "PLAY.RPE")
+FUN <- RPE.FUN %>% filter(outcome == "HIIT.FUN" | outcome == "PLAY.FUN")
+
+HR.PERC <- RPE.FUN.wide %>%
+  gather(key = "measure", value = "value",
+         HIIT.VIG.PERC, PLAY.VIG.PERC, HIIT.MOD.PERC, PLAY.MOD.PERC) %>%
+  mutate(measure = as.factor(measure))
+
+VIG <- HR.PERC %>% filter(measure == "HIIT.VIG.PERC" | measure == "PLAY.VIG.PERC")
+MOD <- HR.PERC %>% filter(measure == "HIIT.MOD.PERC" | measure == "PLAY.MOD.PERC")
+```
+
+### RPE - HIIT vs PLAY
+
+```{r chunk4, echo=FALSE}
+# time (WEEK) should be included in the fixed effects
+lme.rpe <- lmer(score ~ outcome + WEEK + (1|SUBJECT),
+                 data = RPE)
+summary(lme.rpe)
+```
+
+Mean HIIT.RPE = 5.0195
+
+Mean PLAY.RPE = 4.5177
+
+Mean Difference = -0.5018
+
+### FUN - HIIT vs PLAY
+
+```{r chunk5, echo=FALSE}
+lme.fun <- lmer(score ~ outcome + (1|SUBJECT),
+                 data = FUN)
+summary(lme.fun)
+```
+
+Mean HIIT.FUN = 3.2198
+
+Mean PLAY.FUN = 2.4412
+
+Mean Difference = -0.7786
+
+### VIG% - HIIT vs PLAY
+
+```{r chunk6, echo=FALSE}
+lme.vig <- lmer(value ~ measure + (1|SUBJECT),
+                data = VIG)
+summary(lme.vig)
+```
+
+Mean HIIT Vig% = 0.33188
+
+Mean PLAY vig% = 0.60361
+
+Mean Difference = 0.27173
+
+### MOD% - HIIT vs PLAY
+
+```{r chunk7, echo=FALSE}
+lme.mod <- lmer(value ~ measure + (1|SUBJECT),
+                data = MOD)
+summary(lme.mod)
+```
+
+Mean HIIT Mod% = 0.54665
+
+Mean PLAY Mod% = 0.36071
+
+Mean Difference = -0.18594

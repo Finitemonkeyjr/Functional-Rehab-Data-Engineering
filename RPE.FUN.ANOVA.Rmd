@@ -1,0 +1,148 @@
+---
+title: "RPE FUN ANOVA"
+author: "Ian Brown"
+date: "2025-02-25"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r chunk2, echo=FALSE, include=FALSE}
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+```
+
+```{r chunk3, echo=FALSE}
+RPE.FUN.wide <- read.csv('Data/RPE_FUN_AVG.csv', header = T)
+RPE.FUN.wide <- na.omit(RPE.FUN.wide)
+RPE.FUN.wide <- RPE.FUN.wide[RPE.FUN.wide$WEEK < 11, ]
+attach(RPE.FUN.wide)
+
+RPE.FUN <- RPE.FUN.wide %>%
+  gather(key = "outcome", value = "score",
+         HIIT.RPE, HIIT.FUN, PLAY.RPE, PLAY.FUN) %>%
+  mutate(outcome = as.factor(outcome)) %>%
+  mutate(SUBJECT = as.factor(SUBJECT)) %>%
+  mutate(WEEK = as.factor(WEEK))
+RPE.FUN <- RPE.FUN[, -c(4,5,6,8:24)]
+attach(RPE.FUN)
+```
+
+### One-way ANOVA
+
+###### Summary Stats
+
+```{r chunk4, echo=FALSE}
+RPE.FUN %>%
+  group_by(outcome) %>%
+  get_summary_stats(score, type = "mean_sd")
+
+bxp <- ggboxplot(RPE.FUN, x = "outcome", y = "score", add = "point")
+bxp
+```
+
+###### Assumptions
+
+```{r chunk5, echo=FALSE}
+RPE.FUN %>%
+  group_by(outcome) %>% 
+  identify_outliers(score) # no extreme outliers
+RPE.FUN %>%
+  group_by(outcome) %>%
+  shapiro_test(score) # does not pass shapiro test but n > 50. Check QQ-plot
+ggqqplot(RPE.FUN, "score", title = "Non-Transformed", facet.by = "outcome")
+```
+
+There are no extreme outliers. Did not pass Shapiro-Wilk test, however, due to n>50 this test becomes very sensitive to minor deviations, so QQ-plots were created. Normality assumption based on QQ-plots is on the verge of not being met. Did various transformations of "score" to see if I could get a better distribution. Sphericity is check during computation. All transformations were either about the same or much worse. Analysis run with non-transformed data.
+
+###### Computation
+
+```{r chunk6, echo=FALSE}
+anova.score <- anova_test(data = RPE.FUN, dv = score,
+                          wid = c(SUBJECT,WEEK), within = outcome)
+data.frame(get_anova_table(anova.score))
+```
+
+###### Post-hoc tests
+
+```{r chunk7, echo=FALSE}
+pwc <- RPE.FUN %>%
+  pairwise_t_test(
+    score ~ outcome, paired = TRUE,
+    p.adjust.method = "bonferroni"
+  )
+data.frame(pwc)
+```
+
+###### Box Plots with p-values
+
+```{r chunk8, echo=FALSE}
+pwc <- pwc %>% add_xy_position(x = "outcome")
+bxp +
+  stat_pvalue_manual(pwc) +
+  labs(subtitle = get_test_label(anova.score, detailed = T),
+       caption = get_pwc_label(pwc))
+```
+
+### Two-way ANOVA between WEEK (time) and outcome
+
+###### Summary Stats
+
+```{r chunk9, echo=FALSE}
+RPE.FUN %>%
+  group_by(outcome, WEEK) %>%
+  get_summary_stats(score, type = "mean_sd")
+
+bxp <- ggboxplot(RPE.FUN,
+                 x = "WEEK", y = "score", add = "point",
+                 color = "outcome")
+bxp
+```
+
+###### Assumptions
+
+```{r chunk10, echo=FALSE}
+RPE.FUN %>%
+  group_by(outcome, WEEK) %>% 
+  identify_outliers(score) # 
+RPE.FUN %>%
+  group_by(outcome, WEEK) %>%
+  shapiro_test(score) # does not pass shapiro test but n > 50. Check QQ-plot
+ggqqplot(RPE.FUN, "score", title = "Non-Transformed")+
+  facet_grid(outcome ~ WEEK, labeller = "label_both")
+```
+
+There are 2 extreme outliers (SUBJECT 56 WEEK 5 and SUBJECT 1 WEEK 10). Similar to one-way ANOVA, most groups do not pass the Shapiro-Wilk test for normality. However, there are some groups that do pass it. Most QQ-plots looks similar to those groups that passed the Shapiro-Wilk test.
+
+###### Computation
+
+```{r chunk11, echo=FALSE}
+anova.score <- anova_test(data = RPE.FUN, dv = score,
+                          wid = SUBJECT, within = c(WEEK, outcome))
+data.frame(get_anova_table(anova.score))
+```
+
+###### Post-hoc tests
+
+```{r chunk12, echo=FALSE}
+pwc <- RPE.FUN %>%
+  group_by(WEEK) %>%
+  pairwise_t_test(score ~ outcome, paired = TRUE,
+                  p.adjust.method = "bonferroni")
+data.frame(pwc)
+```
+
+###### Box-plots with p-values
+
+```{r chunk13, echo=FALSE}
+pwc <- pwc %>% add_xy_position(x = "WEEK")
+bxp +
+  stat_pvalue_manual(pwc, tip.length = 0, hide.ns = TRUE) +
+  labs(subtitle = get_test_label(anova.score, detailed = T),
+       caption = get_pwc_label(pwc))
+```
+
+
